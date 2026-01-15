@@ -1,0 +1,35 @@
+# Build artifacts
+/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+*.elf
+*.bin
+*.hex
+*.map
+*.a
+*.o
+*.d
+*.lib
+
+# IDF component manager packages
+/esp-idf/components/*/build/
+/esp-idf/components/*/.cmake/
+/esp-idf/components/*/CMakeFiles/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VS Code settings
+.vscode/
+
+# CLion
+.idea/
+
+# MacOS / Linux temp files
+.DS_Store
+*.swp
+*.swo
