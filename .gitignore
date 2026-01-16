@@ -33,3 +33,8 @@ __pycache__/
 .DS_Store
 *.swp
 *.swo
+
+# IDF stuff
+managed_components/
+sdkconfig.old
+sdkconfig
