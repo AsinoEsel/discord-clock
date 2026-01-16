@@ -1,0 +1,21 @@
+menu "Discord Clock Configuration"
+
+config AP_SSID
+    string "Access Point SSID"
+    default "Discord Clock"
+    help
+      The SSID for the Wi-Fi access point.
+
+config AP_PASSWORD
+    string "Access Point Password"
+    default "discordclock"
+    help
+      The password for the Wi-Fi access point.
+
+config MAX_STA_RETRIES
+    int "Maximum Station Connection Retries"
+    default 5
+    help
+      The maximum number of retries for connecting to a station.
+
+endmenu

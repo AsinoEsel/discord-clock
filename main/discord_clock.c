@@ -27,10 +27,7 @@ static discord_handle_t bot;
 static const char *TAG = "wifi_portal";
 
 // ======= CONFIG =======
-#define AP_SSID "Discord Clock"  // TODO: move into component config
-#define AP_PASSWORD "discordclock"  // TODO: move into component config
-#define AP_MAX_CONN 4
-#define MAX_STA_RETRIES 5
+#define AP_MAX_CONN 4  // Maximum number of connections to the AP
 static char saved_color[8] = "#23A55A"; // Default color
 
 
@@ -366,7 +363,7 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 esp_wifi_connect();
                 break;
             case WIFI_EVENT_STA_DISCONNECTED:
-                if (sta_retry_count < MAX_STA_RETRIES) {
+                if (sta_retry_count < CONFIG_MAX_STA_RETRIES) {
                     ESP_LOGI(TAG, "STA disconnected, retrying...");
                     esp_wifi_connect();
                     sta_retry_count++;
@@ -401,8 +398,8 @@ void start_ap(void) {
     if (server) stop_webserver(server);
 
     wifi_config_t ap_config = {0};
-    strncpy((char*)ap_config.ap.ssid, AP_SSID, sizeof(ap_config.ap.ssid));
-    strncpy((char*)ap_config.ap.password, AP_PASSWORD, sizeof(ap_config.ap.password));
+    strncpy((char*)ap_config.ap.ssid, CONFIG_AP_SSID, sizeof(ap_config.ap.ssid));
+    strncpy((char*)ap_config.ap.password, CONFIG_AP_PASSWORD, sizeof(ap_config.ap.password));
     ap_config.ap.max_connection = AP_MAX_CONN;
     ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
@@ -410,7 +407,7 @@ void start_ap(void) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "AP started: SSID='%s'", AP_SSID);
+    ESP_LOGI(TAG, "AP started: SSID='%s'", CONFIG_AP_SSID);
     server = start_webserver();
 }
 
