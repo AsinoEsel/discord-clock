@@ -16,6 +16,8 @@
 
 #include "led_strip.h"
 
+#include "config_portal.h"
+
 #define LED_STRIP_GPIO_PIN  16
 #define LED_STRIP_LED_COUNT 24
 #define LED_STRIP_RMT_RES_HZ  (10 * 1000 * 1000)  // 10MHz resolution, 1 tick = 0.1us (led strip needs a high resolution)
@@ -24,22 +26,17 @@ static led_strip_handle_t led_strip = NULL; // Global handle for the LED strip
 static discord_handle_t bot;
 
 
-static const char *TAG = "wifi_portal";
+static const char *TAG = "discord_clock";
 
 // ======= CONFIG =======
 #define AP_MAX_CONN 4  // Maximum number of connections to the AP
-static char saved_color[8] = "#23A55A"; // Default color
-
+#define DEFAULT_COLOR "#23A55A"
 
 // ======= FUNCTION DECLARATIONS =======
 void start_ap(void);
 void start_sta(const char* ssid, const char* pass);
 void wifi_event_handler(void* arg, esp_event_base_t event_base,
                         int32_t event_id, void* event_data);
-httpd_handle_t start_webserver(void);
-void stop_webserver(httpd_handle_t server);
-void save_credentials(const char* ssid, const char* pass);
-bool load_credentials(char* ssid, size_t ssid_len, char* pass, size_t pass_len);
 void connection_success_callback(void);
 
 
@@ -98,8 +95,12 @@ static void parse_color(const char *color, uint8_t *r, uint8_t *g, uint8_t *b)
 
 void set_leds(bool on)
 {
+    char led_color[8];
+    if (load_setting("led_color", led_color, sizeof(led_color)) != ESP_OK)
+        strncpy(led_color, DEFAULT_COLOR, sizeof(led_color));
+
     uint8_t red, green, blue;
-    parse_color(saved_color, &red, &green, &blue);
+    parse_color(led_color, &red, &green, &blue);
     
     if (led_strip == NULL) {
         ESP_LOGE(TAG, "LED strip not initialized");
@@ -252,124 +253,6 @@ void free_voice_states() {
 }
 
 
-// ======= HTTP HANDLERS =======
-extern const unsigned char _binary_index_html_start[];
-extern const unsigned char _binary_index_html_end[];
-
-esp_err_t index_get_handler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(
-        req,
-        (const char *)_binary_index_html_start,
-        _binary_index_html_end - _binary_index_html_start
-    );
-    return ESP_OK;
-}
-
-extern const unsigned char _binary_style_css_start[];
-extern const unsigned char _binary_style_css_end[];
-
-esp_err_t css_get_handler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "text/css");
-    httpd_resp_send(
-        req,
-        (const char *)_binary_style_css_start,
-        _binary_style_css_end - _binary_style_css_start
-    );
-    return ESP_OK;
-}
-
-esp_err_t save_post_handler(httpd_req_t *req) {
-    char buf[128];
-    int ret = httpd_req_recv(req, buf, req->content_len);
-    if (ret <= 0) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    buf[ret] = 0;
-
-    // Very simple parser (assuming ssid=...&pass=...)
-    char ssid[32] = {0};
-    char pass[64] = {0};
-    sscanf(buf, "ssid=%31[^&]&pass=%63s", ssid, pass);
-
-    ESP_LOGI(TAG, "Received SSID='%s', PASS='%s'", ssid, pass);
-    save_credentials(ssid, pass);
-
-    httpd_resp_sendstr(req, "Credentials saved. Rebooting...");
-    vTaskDelay(pdMS_TO_TICKS(1000)); // wait 1s so browser sees response
-
-    esp_restart(); // reboot ESP to attempt STA connection
-    return ESP_OK;
-}
-
-// ======= WEBSERVER =======
-httpd_handle_t start_webserver(void) {
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    httpd_handle_t server = NULL;
-    if (httpd_start(&server, &config) == ESP_OK) {
-        httpd_uri_t index_uri = {
-            .uri = "/",
-            .method = HTTP_GET,
-            .handler = index_get_handler
-        };
-        httpd_register_uri_handler(server, &index_uri);
-
-        httpd_uri_t css_uri = {
-            .uri = "/style.css",
-            .method = HTTP_GET,
-            .handler = css_get_handler
-        };
-        httpd_register_uri_handler(server, &css_uri);
-
-        httpd_uri_t save_uri = {
-            .uri = "/save",
-            .method = HTTP_POST,
-            .handler = save_post_handler
-        };
-        httpd_register_uri_handler(server, &save_uri);
-    }
-    return server;
-}
-
-void stop_webserver(httpd_handle_t server) {
-    if (server) {
-        httpd_stop(server);
-    }
-}
-
-// ======= NVS =======
-void save_credentials(const char* ssid, const char* pass) {
-    nvs_handle_t handle;
-    nvs_open("wifi", NVS_READWRITE, &handle);
-    nvs_set_str(handle, "ssid", ssid);
-    nvs_set_str(handle, "pass", pass);
-    nvs_commit(handle);
-    nvs_close(handle);
-}
-
-bool load_credentials(char* ssid, size_t ssid_len, char* pass, size_t pass_len) {
-    nvs_handle_t handle;
-    if (nvs_open("wifi", NVS_READONLY, &handle) != ESP_OK) return false;
-
-    size_t ssid_size = ssid_len;
-    size_t pass_size = pass_len;
-
-    if (nvs_get_str(handle, "ssid", ssid, &ssid_size) != ESP_OK) {
-        nvs_close(handle);
-        return false;
-    }
-
-    if (nvs_get_str(handle, "pass", pass, &pass_size) != ESP_OK) {
-        nvs_close(handle);
-        return false;
-    }
-
-    nvs_close(handle);
-    return true;
-}
-
-
 // ======= WIFI STA/AP LOGIC =======
 static bool sta_connected = false;
 static httpd_handle_t server = NULL;
@@ -416,7 +299,7 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
 
 void start_ap(void) {
-    if (server) stop_webserver(server);
+    if (server) config_portal_stop(server);
 
     wifi_config_t ap_config = {0};
     strncpy((char*)ap_config.ap.ssid, CONFIG_AP_SSID, sizeof(ap_config.ap.ssid));
@@ -429,7 +312,7 @@ void start_ap(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "AP started: SSID='%s'", CONFIG_AP_SSID);
-    server = start_webserver();
+    server = config_portal_start();
 }
 
 
@@ -456,6 +339,10 @@ void connection_success_callback(void) {
 
     led_strip = configure_led();
 
+    if (!server) {
+        server = config_portal_start();
+    }
+
     discord_config_t cfg = {
        .intents = DISCORD_INTENT_GUILD_VOICE_STATES
     };
@@ -478,6 +365,9 @@ void app_main(void) {
     esp_netif_create_default_wifi_sta();
     esp_netif_create_default_wifi_ap();
 
+    // Init settings
+    config_portal_init();
+
     // Initialize Wi-Fi once
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -491,12 +381,20 @@ void app_main(void) {
                                         &wifi_event_handler, NULL, &instance_any_id);
 
     // Decide STA vs AP
-    char ssid[32], pass[64];
-    if (load_credentials(ssid, sizeof(ssid), pass, sizeof(pass))) {
+    char ssid[32] = {0};
+    char pass[64] = {0};
+
+    bool have_ssid =
+        load_setting("ssid", ssid, sizeof(ssid)) == ESP_OK;
+    bool have_pass =
+        load_setting("pass", pass, sizeof(pass)) == ESP_OK;
+
+    if (have_ssid && have_pass) {
         ESP_LOGI(TAG, "Found saved credentials, starting STA...");
         start_sta(ssid, pass);
     } else {
         ESP_LOGI(TAG, "No saved credentials, starting AP...");
         start_ap();
     }
+
 }
