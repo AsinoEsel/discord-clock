@@ -253,15 +253,29 @@ void free_voice_states() {
 
 
 // ======= HTTP HANDLERS =======
+extern const unsigned char _binary_index_html_start[];
+extern const unsigned char _binary_index_html_end[];
+
 esp_err_t index_get_handler(httpd_req_t *req) {
-    const char* resp =
-        "<!DOCTYPE html><html><body>"
-        "<h1>ESP32 Captive Portal</h1>"
-        "<form action='/save' method='post'>"
-        "SSID: <input name='ssid'><br>"
-        "Password: <input name='pass'><br>"
-        "<input type='submit'></form></body></html>";
-    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(
+        req,
+        (const char *)_binary_index_html_start,
+        _binary_index_html_end - _binary_index_html_start
+    );
+    return ESP_OK;
+}
+
+extern const unsigned char _binary_style_css_start[];
+extern const unsigned char _binary_style_css_end[];
+
+esp_err_t css_get_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/css");
+    httpd_resp_send(
+        req,
+        (const char *)_binary_style_css_start,
+        _binary_style_css_end - _binary_style_css_start
+    );
     return ESP_OK;
 }
 
@@ -300,6 +314,13 @@ httpd_handle_t start_webserver(void) {
             .handler = index_get_handler
         };
         httpd_register_uri_handler(server, &index_uri);
+
+        httpd_uri_t css_uri = {
+            .uri = "/style.css",
+            .method = HTTP_GET,
+            .handler = css_get_handler
+        };
+        httpd_register_uri_handler(server, &css_uri);
 
         httpd_uri_t save_uri = {
             .uri = "/save",
