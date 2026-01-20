@@ -18,4 +18,25 @@ config MAX_STA_RETRIES
     help
       The maximum number of retries for connecting to a station.
 
+config AP_MAX_CONN
+    int "Maximum Access Point Connections"
+    default 4
+    range 1 10
+    help
+      The maximum number of devices that can connect to the access point.
+
+config LED_STRIP_GPIO
+    int "LED strip GPIO"
+    default 16
+    range 0 48
+    help
+        GPIO pin used to drive the LED strip (WS2812, etc).
+
+config LED_STRIP_LED_COUNT
+    int "Number of LEDs"
+    default 16
+    range 1 1024
+    help
+        Number of LEDs in the strip.
+
 endmenu

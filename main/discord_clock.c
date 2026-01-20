@@ -18,19 +18,12 @@
 
 #include "config_portal.h"
 
-#define LED_STRIP_GPIO_PIN  16
-#define LED_STRIP_LED_COUNT 24
-#define LED_STRIP_RMT_RES_HZ  (10 * 1000 * 1000)  // 10MHz resolution, 1 tick = 0.1us (led strip needs a high resolution)
+#include "led_animation.h"
 
-static led_strip_handle_t led_strip = NULL; // Global handle for the LED strip
+
 static discord_handle_t bot;
-
-
 static const char *TAG = "discord_clock";
 
-// ======= CONFIG =======
-#define AP_MAX_CONN 4  // Maximum number of connections to the AP
-#define DEFAULT_COLOR "#23A55A"
 
 // ======= FUNCTION DECLARATIONS =======
 void start_ap(void);
@@ -38,88 +31,6 @@ void start_sta(const char* ssid, const char* pass);
 void wifi_event_handler(void* arg, esp_event_base_t event_base,
                         int32_t event_id, void* event_data);
 void connection_success_callback(void);
-
-
-/* LED CODE */
-
-led_strip_handle_t configure_led(void)
-{
-    // LED strip general initialization, according to your led board design
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = LED_STRIP_GPIO_PIN, // The GPIO that connected to the LED strip's data line
-        .max_leds = LED_STRIP_LED_COUNT,      // The number of LEDs in the strip,
-        .led_model = LED_MODEL_WS2812,        // LED strip model
-        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB, // The color order of the strip: GRB
-        .flags = {
-            .invert_out = false, // don't invert the output signal
-        }
-    };
-
-    // LED strip backend configuration: RMT
-    led_strip_rmt_config_t rmt_config = {
-        .clk_src = RMT_CLK_SRC_DEFAULT,        // different clock source can lead to different power consumption
-        .resolution_hz = LED_STRIP_RMT_RES_HZ, // RMT counter clock frequency
-        .mem_block_symbols = 64,               // the memory size of each RMT channel, in words (4 bytes)
-        .flags = {
-            .with_dma = false, // DMA feature is available on chips like ESP32-S3/P4
-        }
-    };
-
-    // LED Strip object handle
-    led_strip_handle_t led_strip;
-    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
-    ESP_LOGI(TAG, "Created LED strip object with RMT backend");
-    return led_strip;
-}
-
-
-static void parse_color(const char *color, uint8_t *r, uint8_t *g, uint8_t *b)
-{
-    if (color[0] == '#' && strlen(color) == 7) {
-        // Parse the red, green, and blue components
-        char red[3] = {color[1], color[2], '\0'};   // First two hex digits after #
-        char green[3] = {color[3], color[4], '\0'}; // Next two hex digits
-        char blue[3] = {color[5], color[6], '\0'};  // Last two hex digits
-
-        *r = (uint8_t)strtol(red, NULL, 16);
-        *g = (uint8_t)strtol(green, NULL, 16);
-        *b = (uint8_t)strtol(blue, NULL, 16);
-    } else {
-        // Default to black if the format is incorrect
-        *r = 100;
-        *g = 0;
-        *b = 0;
-    }
-}
-
-
-void set_leds(bool on)
-{
-    char led_color[8];
-    if (load_setting("led_color", led_color, sizeof(led_color)) != ESP_OK)
-        strncpy(led_color, DEFAULT_COLOR, sizeof(led_color));
-
-    uint8_t red, green, blue;
-    parse_color(led_color, &red, &green, &blue);
-    
-    if (led_strip == NULL) {
-        ESP_LOGE(TAG, "LED strip not initialized");
-        return;
-    }
-
-    if (!on) {
-        // Turn off all LEDs
-        ESP_ERROR_CHECK(led_strip_clear(led_strip));
-        ESP_LOGI(TAG, "LEDs turned OFF");
-    } else {
-        ESP_LOGI(TAG, "Setting LEDs to color: R=%d, G=%d, B=%d", red, green, blue);
-        // Turn on all LEDs with a dim white color
-        for (int i = 0; i < LED_STRIP_LED_COUNT; i++) {
-            ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, i, red, green, blue));
-        }
-        ESP_ERROR_CHECK(led_strip_refresh(led_strip));
-    }
-}
 
 
 /* DISCORD CODE */
@@ -225,10 +136,10 @@ static void bot_event_handler(void* handler_arg, esp_event_base_t base, int32_t 
 
             // Example action: Toggle LED based on user count
             if (voice_channel_user_count > 0) {
-                set_leds(true);
+                led_animation_set(LED_ANIM_SOLID);
                 gpio_set_level(LED_GPIO, 1);  // Turn LED on
             } else {
-                set_leds(false);
+                led_animation_set(LED_ANIM_OFF);
                 gpio_set_level(LED_GPIO, 0);  // Turn LED off
             }
         } break;
@@ -304,7 +215,7 @@ void start_ap(void) {
     wifi_config_t ap_config = {0};
     strncpy((char*)ap_config.ap.ssid, CONFIG_AP_SSID, sizeof(ap_config.ap.ssid));
     strncpy((char*)ap_config.ap.password, CONFIG_AP_PASSWORD, sizeof(ap_config.ap.password));
-    ap_config.ap.max_connection = AP_MAX_CONN;
+    ap_config.ap.max_connection = CONFIG_AP_MAX_CONN;
     ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
@@ -336,8 +247,6 @@ void connection_success_callback(void) {
     gpio_reset_pin(LED_GPIO);
     gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
     gpio_set_level(LED_GPIO, 0);
-
-    led_strip = configure_led();
 
     if (!server) {
         server = config_portal_start();
@@ -372,6 +281,32 @@ void app_main(void) {
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
+
+    // Initialize LED Strip
+
+    led_strip_handle_t strip;
+
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = CONFIG_LED_STRIP_GPIO,
+        .max_leds = CONFIG_LED_STRIP_LED_COUNT,
+        .led_model = LED_MODEL_WS2812,
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        .flags.invert_out = false,
+    };
+
+    led_strip_rmt_config_t rmt_config = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = 10 * 1000 * 1000,
+        .mem_block_symbols = 64,
+        .flags.with_dma = false,
+    };
+
+    ESP_ERROR_CHECK(
+        led_strip_new_rmt_device(&strip_config, &rmt_config, &strip)
+    );
+
+    led_animation_init(strip);
+    led_animation_set(LED_ANIM_SOLID);
 
     // Register event handlers
     esp_event_handler_instance_t instance_any_id;
