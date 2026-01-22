@@ -1,5 +1,11 @@
 menu "Discord Clock Configuration"
 
+config DEVICE_NAME
+    string "Device Name"
+    default "discord-clock"
+    help
+      The device name, used as DHCP hostname and for mDNS. May only contain a-Z, 0-9, and non-leading non-trailing hyphens.
+
 config AP_SSID
     string "Access Point SSID"
     default "Discord Clock"

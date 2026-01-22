@@ -8,6 +8,7 @@
 #include "string.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "mdns.h"
 
 #include "driver/gpio.h"
 #include "discord.h"
@@ -236,13 +237,37 @@ void start_sta(const char* ssid, const char* pass) {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    // Set DHCP hostname
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    ESP_ERROR_CHECK(esp_netif_set_hostname(netif, CONFIG_DEVICE_NAME));
+
     ESP_LOGI(TAG, "STA started. Trying to connect to SSID='%s'", ssid);
+}
+
+
+static void init_mdns(void)
+{
+    ESP_ERROR_CHECK(mdns_init());
+    ESP_ERROR_CHECK(mdns_hostname_set(CONFIG_DEVICE_NAME));
+    ESP_ERROR_CHECK(mdns_instance_name_set("Discord Clock"));
+
+    // Advertise HTTP service
+    ESP_ERROR_CHECK(mdns_service_add(
+        "Discord Clock Settings Portal",
+        "_http",
+        "_tcp",
+        80,
+        NULL,
+        0
+    ));
 }
 
 
 // ======= SUCCESS CALLBACK =======
 void connection_success_callback(void) {
     ESP_LOGI(TAG, "STA connected successfully! Callback triggered.");
+
+    init_mdns();
 
     gpio_reset_pin(LED_GPIO);
     gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
